@@ -17,6 +17,106 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
+-- Name: BankaVeritabani; Type: DATABASE; Schema: -; Owner: postgres
+--
+
+CREATE DATABASE "BankaVeritabani" WITH TEMPLATE = template0 ENCODING = 'UTF8' LC_COLLATE = 'Turkish_Turkey.1254' LC_CTYPE = 'Turkish_Turkey.1254';
+
+
+ALTER DATABASE "BankaVeritabani" OWNER TO postgres;
+
+\connect "BankaVeritabani"
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: faiz_ekle(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.faiz_ekle() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE 
+    faiz REAL = (SELECT "faizOrani" FROM "KrediTuru" WHERE "krediTuruKodu" = NEW."krediTuruKodu");
+BEGIN
+    NEW."odenecekMiktar" = (faiz * (NEW."miktar" / 100)) + NEW."miktar";
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.faiz_ekle() OWNER TO postgres;
+
+--
+-- Name: mudurekle(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.mudurekle() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW."departmanKodu" = 3 THEN
+         UPDATE "Sube" SET "mudur"  = NEW."kisiId" WHERE "subeKodu" = NEW."subeKodu";
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.mudurekle() OWNER TO postgres;
+
+--
+-- Name: musterigoster(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.musterigoster() RETURNS text
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    musteriler "Kisi"%ROWTYPE;
+    sonuc TEXT;
+BEGIN
+    sonuc := '';
+    FOR musteriler IN SELECT * FROM "Kisi" WHERE "kisiId" IN (SELECT "kisiId" FROM "Musteri" ) LOOP
+        sonuc := sonuc || musteriler."kisiId" || E'\t' || musteriler."adi" || E'\t' || musteriler."soyadi" || E'\r\n';
+    END LOOP;
+    RETURN sonuc;
+ END;
+ $$;
+
+
+ALTER FUNCTION public.musterigoster() OWNER TO postgres;
+
+--
+-- Name: musteriyap(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.musteriyap() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE 
+musteri_mi BOOLEAN = (SELECT "bankMusterisiMi" FROM "Musteri" WHERE "kisiId" = NEW."musteriId" );
+BEGIN
+    IF musteri_mi = FALSE THEN
+    UPDATE "Musteri" SET "bankMusterisiMi" = TRUE WHERE "kisiId" = NEW."musteriId";
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.musteriyap() OWNER TO postgres;
+
+--
 -- Name: ortalamamaas(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -33,6 +133,44 @@ $$;
 
 
 ALTER FUNCTION public.ortalamamaas() OWNER TO postgres;
+
+--
+-- Name: personel_maas(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.personel_maas() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE 
+    departmanMaas REAL = (SELECT "asgariMaas" FROM "Departman" WHERE "departmanKodu" = NEW."departmanKodu");
+BEGIN
+    IF NEW."maas" < departmanMaas THEN
+         RAISE EXCEPTION 'Maaş bu departmanın en düşük maaşından küçük olamaz';  
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.personel_maas() OWNER TO postgres;
+
+--
+-- Name: personelara(integer); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.personelara(personelno integer) RETURNS TABLE(numara integer, adi character varying, soyadi character varying, departmankodu integer, deparmantadi character varying, maas real)
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RETURN QUERY SELECT "Personel"."kisiId", "Kisi"."adi", "Kisi"."soyadi", "Personel"."departmanKodu", "Departman"."departmanAdi", "Personel"."maas"  FROM "Personel" 
+                INNER JOIN "Kisi" ON "Personel"."kisiId" = "Kisi"."kisiId"
+                INNER JOIN "Departman" ON "Personel"."departmanKodu" = "Departman"."departmanKodu";
+                 
+END;
+$$;
+
+
+ALTER FUNCTION public.personelara(personelno integer) OWNER TO postgres;
 
 --
 -- Name: tl2dollar(real); Type: FUNCTION; Schema: public; Owner: postgres
@@ -62,8 +200,8 @@ CREATE TABLE public."AcilanHesap" (
     "hesapTuruKodu" smallint NOT NULL,
     "musteriId" integer NOT NULL,
     "acilmaTarihi" date DEFAULT CURRENT_DATE,
-    "icindekiPara" money,
-    "personelId" integer NOT NULL
+    "personelId" integer NOT NULL,
+    "icindekiPara" real DEFAULT '0'::real
 );
 
 
@@ -77,7 +215,7 @@ CREATE TABLE public."Banka" (
     "bankaNo" integer NOT NULL,
     "bankaAdi" character varying(40) NOT NULL,
     telefon integer NOT NULL,
-    "genelMudur" smallint NOT NULL
+    "genelMudur" smallint
 );
 
 
@@ -111,7 +249,7 @@ ALTER SEQUENCE public."Banka_bankaNo_seq" OWNED BY public."Banka"."bankaNo";
 
 CREATE TABLE public."Departman" (
     "departmanKodu" integer NOT NULL,
-    "deparmantAdi" character varying(40),
+    "departmanAdi" character varying(40),
     "asgariMaas" real
 );
 
@@ -359,8 +497,8 @@ CREATE TABLE public."Kredi" (
     "musteriId" integer NOT NULL,
     "personelId" integer NOT NULL,
     miktar real NOT NULL,
-    "odenecekMiktar" real NOT NULL,
-    "odenenenMiktar" real NOT NULL
+    "odenecekMiktar" real,
+    "odenenenMiktar" real DEFAULT '0'::real
 );
 
 
@@ -422,8 +560,8 @@ ALTER TABLE public."Musteri" OWNER TO postgres;
 CREATE TABLE public."Personel" (
     "kisiId" integer NOT NULL,
     "girisTarihi" date DEFAULT CURRENT_DATE,
-    "departmanKodu" smallint NOT NULL,
-    "subeKodu" smallint NOT NULL,
+    "departmanKodu" integer NOT NULL,
+    "subeKodu" integer NOT NULL,
     maas real NOT NULL
 );
 
@@ -576,19 +714,24 @@ ALTER TABLE ONLY public."TransferTuru" ALTER COLUMN "transferTuruKodu" SET DEFAU
 -- Data for Name: AcilanHesap; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."AcilanHesap" ("hesapNo", "hesapTuruKodu", "musteriId", "acilmaTarihi", "personelId", "icindekiPara") VALUES
+	(112, 2, 3, '2020-08-14', 5, 0),
+	(111, 2, 4, '2020-08-14', 5, 500);
 
 
 --
 -- Data for Name: Banka; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."Banka" ("bankaNo", "bankaAdi", telefon, "genelMudur") VALUES
+	(1, 'Garrett Bankası', 4444444, NULL);
 
 
 --
 -- Data for Name: Departman; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-INSERT INTO public."Departman" VALUES
+INSERT INTO public."Departman" ("departmanKodu", "departmanAdi", "asgariMaas") VALUES
 	(1, 'Gişe Memuru', 2500),
 	(3, 'Müdür', 7500),
 	(4, 'Genel Müdür', 10000),
@@ -599,6 +742,9 @@ INSERT INTO public."Departman" VALUES
 -- Data for Name: Hesap; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."Hesap" ("hesapTuruKodu", "hesapTuru") VALUES
+	(1, 'Vadeli'),
+	(2, 'Vadesiz');
 
 
 --
@@ -617,73 +763,117 @@ INSERT INTO public."Departman" VALUES
 -- Data for Name: Il; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-INSERT INTO public."Il" VALUES
+INSERT INTO public."Il" ("ilKodu", "ilAdi") VALUES
 	(1, 'Adana'),
 	(2, 'Adıyaman'),
 	(11, 'Afyon'),
 	(12, 'Bingöl'),
-	(13, 'Bitlis');
+	(13, 'Bitlis'),
+	(34, 'İstanbul'),
+	(41, 'Kocaeli');
 
 
 --
 -- Data for Name: Ilce; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."Ilce" ("ilceKodu", "ilceAdi", "ilKodu") VALUES
+	(1, 'Beşiktaş', 34),
+	(2, 'Ortaköy', 34),
+	(3, 'Gebze', 41);
 
 
 --
 -- Data for Name: Iletisim; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."Iletisim" ("iletisimId", telefon, email, adres, "ilceKodu", "kisiId") VALUES
+	(3, 53555555, 'a@w.com', 'asdasda', 2, 1);
 
 
 --
 -- Data for Name: Kisi; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."Kisi" ("kisiId", "tcNo", adi, soyadi) VALUES
+	(1, 123, 'Ahmet', 'Ak'),
+	(2, 124, 'Mehmet', 'Kara'),
+	(3, 125, 'Ali', 'Beyaz'),
+	(4, 212, 'Ayşe', 'Yeşil'),
+	(7, 213, 'Beyza', 'Pembe'),
+	(8, 214, 'Tuğçe', 'Gri'),
+	(5, 121, 'Aytaç', 'Mavi'),
+	(9, 215, 'Cemal', 'Kırmızı'),
+	(6, 250, 'Canan', 'Kahve');
 
 
 --
 -- Data for Name: Kredi; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."Kredi" ("krediNo", "krediTuruKodu", tarih, taksit, "musteriId", "personelId", miktar, "odenecekMiktar", "odenenenMiktar") VALUES
+	(1, 100, '2020-08-14', 12, 3, 5, 20000, 22000, 0);
 
 
 --
 -- Data for Name: KrediTuru; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."KrediTuru" ("krediTuruKodu", "krediAdi", "faizOrani", "maxMiktar") VALUES
+	(100, 'İhtiyaç Kredisi', 10, 20000),
+	(101, 'Taşıt Kredisi', 15, 100000),
+	(102, 'Konut Kredisi', 12, 400000),
+	(103, 'Ziraat Kredisi', 7, 50000);
 
 
 --
 -- Data for Name: Musteri; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."Musteri" ("kisiId", "bankMusterisiMi") VALUES
+	(3, true),
+	(4, true);
 
 
 --
 -- Data for Name: Personel; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."Personel" ("kisiId", "girisTarihi", "departmanKodu", "subeKodu", maas) VALUES
+	(1, '2020-08-14', 4, 1, 12000),
+	(2, '2020-08-14', 3, 1, 8000),
+	(7, '2020-08-14', 3, 2, 8000),
+	(5, '2020-08-14', 2, 1, 5000),
+	(8, '2020-08-14', 1, 1, 2500),
+	(9, '2020-08-14', 1, 1, 2550),
+	(6, '2020-08-14', 2, 1, 3500);
 
 
 --
 -- Data for Name: Sube; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."Sube" ("subeKodu", "subeAdi", adres, "ilceKodu", "bankaNo", mudur) VALUES
+	(1, 'Gebze Şubesi', 'asdasda', 3, 1, 1),
+	(2, 'Ortaköy Şubesi', 'asdasd', 2, 1, 7);
 
 
 --
 -- Data for Name: TransferTuru; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
+INSERT INTO public."TransferTuru" ("transferTuruKodu", "transferTuru") VALUES
+	(1, 'Para Alma'),
+	(2, 'Para Çekme'),
+	(3, 'Fatura Ödeme'),
+	(4, 'Kredi Taksiti Ödeme');
 
 
 --
 -- Name: Banka_bankaNo_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public."Banka_bankaNo_seq"', 1, false);
+SELECT pg_catalog.setval('public."Banka_bankaNo_seq"', 2, true);
 
 
 --
@@ -718,14 +908,14 @@ SELECT pg_catalog.setval('public."Ilce_ilceKodu_seq"', 1, false);
 -- Name: Iletisim_iletisimId_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public."Iletisim_iletisimId_seq"', 1, false);
+SELECT pg_catalog.setval('public."Iletisim_iletisimId_seq"', 3, true);
 
 
 --
 -- Name: Kisi_kisiId_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public."Kisi_kisiId_seq"', 1, false);
+SELECT pg_catalog.setval('public."Kisi_kisiId_seq"', 8, true);
 
 
 --
@@ -739,14 +929,14 @@ SELECT pg_catalog.setval('public."KrediTuru_krediTuruKodu_seq"', 1, false);
 -- Name: Sube_subeKodu_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public."Sube_subeKodu_seq"', 1, false);
+SELECT pg_catalog.setval('public."Sube_subeKodu_seq"', 1, true);
 
 
 --
 -- Name: TransferTuru_transferTuruKodu_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('public."TransferTuru_transferTuruKodu_seq"', 1, false);
+SELECT pg_catalog.setval('public."TransferTuru_transferTuruKodu_seq"', 1, true);
 
 
 --
@@ -931,6 +1121,42 @@ ALTER TABLE ONLY public."TransferTuru"
 
 ALTER TABLE ONLY public."TransferTuru"
     ADD CONSTRAINT "transferTuruUnique" UNIQUE ("transferTuru");
+
+
+--
+-- Name: Sube unique_Sube_mudur; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public."Sube"
+    ADD CONSTRAINT "unique_Sube_mudur" UNIQUE (mudur);
+
+
+--
+-- Name: Kredi faizekle; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER faizekle BEFORE INSERT ON public."Kredi" FOR EACH ROW EXECUTE FUNCTION public.faiz_ekle();
+
+
+--
+-- Name: Personel mudur_ekleme; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER mudur_ekleme AFTER INSERT ON public."Personel" FOR EACH STATEMENT EXECUTE FUNCTION public.mudurekle();
+
+
+--
+-- Name: AcilanHesap musteri_yap; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER musteri_yap AFTER INSERT ON public."AcilanHesap" FOR EACH ROW EXECUTE FUNCTION public.musteriyap();
+
+
+--
+-- Name: Personel pmaas; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER pmaas BEFORE INSERT ON public."Personel" FOR EACH ROW EXECUTE FUNCTION public.personel_maas();
 
 
 --
