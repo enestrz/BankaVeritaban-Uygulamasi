@@ -1,0 +1,1 @@
+Veritabanı dersi için yapılmıştır.
